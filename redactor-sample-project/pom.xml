@@ -11,8 +11,8 @@
     <groupId>com.danimaldan</groupId>
     <artifactId>redactor-sample-project</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>redactor</name>
-    <description>Redactor Security Library</description>
+    <name>Redactor Sample Project</name>
+    <description>Redactor Field-level Security Sample Project</description>
     <properties>
         <java.version>17</java.version>
     </properties>
