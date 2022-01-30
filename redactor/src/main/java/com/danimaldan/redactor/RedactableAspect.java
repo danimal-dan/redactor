@@ -1,8 +1,7 @@
 package com.danimaldan.redactor;
 
 import lombok.extern.slf4j.Slf4j;
-import org.aspectj.lang.ProceedingJoinPoint;
-import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.AfterReturning;
 import org.aspectj.lang.annotation.Aspect;
 import org.springframework.stereotype.Component;
 
@@ -10,14 +9,12 @@ import org.springframework.stereotype.Component;
 @Aspect
 @Component
 public class RedactableAspect {
-    @Around("@annotation(com.danimaldan.redactor.Redact)")
-    public Object performAround(ProceedingJoinPoint joinPoint) throws Throwable {
-        Object resultObject = joinPoint.proceed();
-
-        var redactionApplicator = new RedactionApplicator(resultObject);
+    @AfterReturning(pointcut = "@annotation(com.danimaldan.redactor.Redact)", returning = "returnValue")
+    public Object performAround(Object returnValue) {
+        var redactionApplicator = new RedactionApplicator(returnValue);
 
         redactionApplicator.redact();
 
-        return resultObject;
+        return returnValue;
     }
 }
