@@ -1,8 +1,11 @@
-package com.danimaldan.redactor;
+package com.danimaldan.redactor.applicator;
 
+import com.danimaldan.redactor.RedactAuthorize;
+import com.danimaldan.redactor.Redactable;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.lang.Nullable;
 import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.ReflectionUtils;
 import org.springframework.util.StringUtils;
@@ -11,38 +14,30 @@ import java.beans.IntrospectionException;
 import java.beans.PropertyDescriptor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
+import java.util.Collection;
+import java.util.Objects;
 
 @Slf4j
-public class RedactionApplicator implements ReflectionUtils.FieldCallback {
+class RedactionCollectionApplicator<T> implements RedactionApplicator, ReflectionUtils.FieldCallback {
     private static final ReflectionUtils.FieldFilter REDACT_AUTHORIZE_FIELD_FILTER = field -> field.isAnnotationPresent(RedactAuthorize.class);
-    private static final HasAuthorityPredicate DEFAULT_HAS_AUTHORITY_PREDICATE = authority -> false;
 
-    private final Object object;
+    private final Collection<T> collection;
     private final HasAuthorityPredicate hasAuthorityPredicate;
 
-    public RedactionApplicator(Object object) {
-        this(object, DEFAULT_HAS_AUTHORITY_PREDICATE);
-    }
-
-    public RedactionApplicator(Object object, HasAuthorityPredicate hasAuthorityPredicate) {
-        this.object = object;
+    public RedactionCollectionApplicator(Collection<T> collection, HasAuthorityPredicate hasAuthorityPredicate) {
+        this.collection = collection;
         this.hasAuthorityPredicate = hasAuthorityPredicate;
     }
 
-    @FunctionalInterface
-    interface HasAuthorityPredicate {
-        /**
-         * Determines if the user has access to the authority.
-         */
-        boolean hasAuthority(String authority);
-    }
-
+    @Override
     public void redact() {
-        if (this.object == null) {
+        if (CollectionUtils.isEmpty(collection)) {
             return;
         }
 
-        ReflectionUtils.doWithFields(this.object.getClass(), this, REDACT_AUTHORIZE_FIELD_FILTER);
+        var firstElement = collection.iterator().next();
+
+        ReflectionUtils.doWithFields(firstElement.getClass(), this, REDACT_AUTHORIZE_FIELD_FILTER);
     }
 
     @Override
@@ -54,18 +49,14 @@ public class RedactionApplicator implements ReflectionUtils.FieldCallback {
             // not authorized to view field, redact it
             Assert.isTrue(Redactable.class.isAssignableFrom(field.getType()), "@RedactAuthorize authorization is denied for field '" + field.toGenericString() + "', but field is not Redactable.");
 
-            Redactable<?> redactableObject = (Redactable<?>) invokeGetter(field, this.object);
-
-            if (redactableObject != null) {
-                redactableObject.redact();
-            }
-
-            return;
+            this.collection.stream()
+                    .map(element -> (Redactable<?>) invokeGetter(field, element))
+                    .filter(Objects::nonNull)
+                    .forEach(Redactable::redact);
         }
 
         // run redaction applicator on child properties of the field
-        initializeRedactionApplicatorForValueOfField(field)
-                .redact();
+        initializeAndRedactFieldValues(field);
     }
 
     private boolean hasAuthority(@Nullable String requiredAuthority) {
@@ -76,17 +67,22 @@ public class RedactionApplicator implements ReflectionUtils.FieldCallback {
         return hasAuthorityPredicate.hasAuthority(requiredAuthority);
     }
 
-    private RedactionApplicator initializeRedactionApplicatorForValueOfField(Field field) {
-        Object fieldValue = invokeGetter(field, this.object);
+    private void initializeAndRedactFieldValues(Field field) {
+        this.collection.stream()
+                .map(element -> invokeGetter(field, element))
+                .filter(Objects::nonNull)
+                .map(fieldValue -> {
+                    // optionally unwrap Redactable field value
+                    if (Redactable.class.isAssignableFrom(fieldValue.getClass())) {
+                        Redactable<?> redactableField = (Redactable<?>) fieldValue;
 
-        // unwrap Redactable object if necessary
-        if (fieldValue != null && Redactable.class.isAssignableFrom(fieldValue.getClass())) {
-            Redactable<?> redactableField = (Redactable<?>) fieldValue;
+                        return redactableField.getValue();
+                    }
 
-            fieldValue = redactableField.getValue();
-        }
-
-        return new RedactionApplicator(fieldValue, hasAuthorityPredicate);
+                    return fieldValue;
+                })
+                .map(fieldValue -> RedactionApplicatorFactory.create(fieldValue, this.hasAuthorityPredicate))
+                .forEach(RedactionApplicator::redact);
     }
 
     private Object invokeGetter(Field field, Object object) {

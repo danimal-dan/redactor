@@ -1,7 +1,7 @@
 package com.danimaldan.redactor.domain;
 
-import com.danimaldan.redactor.Redact;
 import com.danimaldan.redactor.Redactable;
+import com.danimaldan.redactor.aop.Redact;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
